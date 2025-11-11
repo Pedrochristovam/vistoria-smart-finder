@@ -1,10 +1,11 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Phone, Mail, User, TrendingUp, CheckCircle2 } from "lucide-react";
+import { Building2, Phone, Mail, User, TrendingUp, CheckCircle2, MapPin } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import type { EmpresaRankeada } from "@/pages/Index";
+import { formatDistance } from "@/lib/geocoding";
 
 interface ResultadosListaProps {
   empresas: EmpresaRankeada[];
@@ -50,50 +51,60 @@ export const ResultadosLista = ({ empresas }: ResultadosListaProps) => {
 
       <div className="space-y-4">
         {empresas.map((empresa, index) => (
-          <Card key={empresa.id} className="p-6 transition-shadow hover:shadow-lg">
+          <Card key={empresa.id} className="group p-6 transition-all hover:shadow-lg hover:border-primary/50">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 space-y-3">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Building2 className="h-5 w-5 text-primary" />
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
+                    <Building2 className="h-6 w-6 text-primary" />
                   </div>
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <h4 className="text-lg font-semibold text-foreground">{empresa.nome}</h4>
                       {index === 0 && (
-                        <Badge className="gap-1 bg-success text-success-foreground">
+                        <Badge className="gap-1 bg-success text-success-foreground shadow-sm">
                           <CheckCircle2 className="h-3 w-3" />
                           Melhor opção
                         </Badge>
                       )}
+                      {empresa.distancia !== undefined && (
+                        <Badge variant="secondary" className="gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {formatDistance(empresa.distancia)}
+                        </Badge>
+                      )}
                     </div>
-                    <p className="text-sm text-muted-foreground">{empresa.endereco}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{empresa.endereco}</p>
                   </div>
                 </div>
 
-                <div className="grid gap-2 text-sm md:grid-cols-3">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Mail className="h-4 w-4" />
-                    {empresa.email}
+                <div className="grid gap-3 text-sm md:grid-cols-3">
+                  <div className="flex items-center gap-2 rounded-md bg-secondary/30 px-3 py-2 text-muted-foreground">
+                    <Mail className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{empresa.email}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Phone className="h-4 w-4" />
-                    {empresa.telefone}
+                  <div className="flex items-center gap-2 rounded-md bg-secondary/30 px-3 py-2 text-muted-foreground">
+                    <Phone className="h-4 w-4 shrink-0" />
+                    <span>{empresa.telefone}</span>
                   </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <User className="h-4 w-4" />
-                    {empresa.responsavel}
+                  <div className="flex items-center gap-2 rounded-md bg-secondary/30 px-3 py-2 text-muted-foreground">
+                    <User className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{empresa.responsavel}</span>
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-secondary/50 p-3">
+                <div className="rounded-lg bg-primary/5 border border-primary/10 p-3">
                   <p className="text-sm text-foreground">
-                    <span className="font-medium">Justificativa:</span> {empresa.motivo}
+                    <span className="font-semibold text-primary">Justificativa:</span> {empresa.motivo}
                   </p>
                 </div>
               </div>
 
-              <Button onClick={() => registrarChamada(empresa)} className="shrink-0">
+              <Button 
+                onClick={() => registrarChamada(empresa)} 
+                className="shrink-0 shadow-sm hover:shadow-md transition-shadow"
+                size="lg"
+              >
                 Selecionar
               </Button>
             </div>

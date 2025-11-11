@@ -15,6 +15,7 @@ export interface EmpresaRankeada {
   chamadas_count: number;
   score: number;
   motivo: string;
+  distancia?: number;
 }
 
 const Index = () => {

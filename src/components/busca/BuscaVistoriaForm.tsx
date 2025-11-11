@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Loader2 } from "lucide-react";
 import type { EmpresaRankeada } from "@/pages/Index";
+import { geocodeAddress, calculateDistance } from "@/lib/geocoding";
 
 const formSchema = z.object({
   endereco: z.string().min(5, "Endereço deve ter no mínimo 5 caracteres"),
@@ -51,6 +52,16 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setIsLoading(true);
     try {
+      // Geocodificar endereço da demanda
+      const enderecoCompleto = `${values.endereco}, ${values.municipio}, ${values.estado}, Brasil`;
+      const coordsDemanda = await geocodeAddress(enderecoCompleto);
+
+      if (!coordsDemanda) {
+        toast.error("Não foi possível localizar o endereço. Verifique os dados informados.");
+        setIsLoading(false);
+        return;
+      }
+
       // Buscar empresas que atendem aos critérios
       const { data: empresasData, error } = await supabase
         .from("empresas")
@@ -68,16 +79,27 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
         return values.servicos.every((servicoId) => servicosEmpresa.includes(servicoId));
       }) || [];
 
-      // Rankear empresas (priorizar menor número de chamadas se for MG)
-      const empresasRankeadas: EmpresaRankeada[] = empresasFiltradas
-        .map((empresa: any) => {
+      // Geocodificar endereços das empresas e calcular distâncias
+      const empresasComDistancia = await Promise.all(
+        empresasFiltradas.map(async (empresa: any) => {
+          const coordsEmpresa = await geocodeAddress(empresa.endereco);
+          let distancia = 0;
+          
+          if (coordsEmpresa && coordsDemanda) {
+            distancia = calculateDistance(coordsDemanda, coordsEmpresa);
+          }
+
           let score = 100;
           let motivo = "Atende aos serviços solicitados";
 
+          // Penalizar por distância (quanto mais longe, menor o score)
+          score -= distancia * 0.5;
+          motivo = `${motivo}. Localizada a ${distancia.toFixed(1)} km do local da vistoria`;
+
           // Se for Minas Gerais, priorizar empresas com menos chamadas
           if (values.estado.toUpperCase() === "MG") {
-            score -= empresa.chamadas_count * 5;
-            motivo = `${motivo}. Empresa com ${empresa.chamadas_count} chamadas anteriores (prioridade para menos chamadas em MG)`;
+            score -= empresa.chamadas_count * 3;
+            motivo = `${motivo}. ${empresa.chamadas_count} chamada(s) anterior(es)`;
           }
 
           return {
@@ -90,8 +112,13 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
             chamadas_count: empresa.chamadas_count,
             score,
             motivo,
+            distancia,
           };
         })
+      );
+
+      // Rankear empresas por score (proximidade + regras de negócio)
+      const empresasRankeadas: EmpresaRankeada[] = empresasComDistancia
         .sort((a, b) => b.score - a.score);
 
       onResultados(empresasRankeadas);
@@ -99,7 +126,7 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
       if (empresasRankeadas.length === 0) {
         toast.error("Nenhuma empresa encontrada com os critérios especificados");
       } else {
-        toast.success(`${empresasRankeadas.length} empresa(s) encontrada(s)`);
+        toast.success(`${empresasRankeadas.length} empresa(s) encontrada(s) e ordenada(s) por proximidade`);
       }
     } catch (error) {
       console.error("Erro ao buscar empresas:", error);
