@@ -1,0 +1,210 @@
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { Button } from "@/components/ui/button";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import { Search, Loader2 } from "lucide-react";
+import type { EmpresaRankeada } from "@/pages/Index";
+
+const formSchema = z.object({
+  endereco: z.string().min(5, "Endereço deve ter no mínimo 5 caracteres"),
+  municipio: z.string().min(2, "Município é obrigatório"),
+  estado: z.string().length(2, "Sigla do estado (ex: MG)"),
+  servicos: z.array(z.string()).min(1, "Selecione pelo menos um serviço"),
+});
+
+interface BuscaVistoriaFormProps {
+  onResultados: (empresas: EmpresaRankeada[]) => void;
+}
+
+export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [servicos, setServicos] = useState<Array<{ id: string; nome: string }>>([]);
+
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      endereco: "",
+      municipio: "",
+      estado: "MG",
+      servicos: [],
+    },
+  });
+
+  // Carregar serviços disponíveis
+  useState(() => {
+    const loadServicos = async () => {
+      const { data } = await supabase
+        .from("servicos")
+        .select("*")
+        .order("ordem");
+      if (data) setServicos(data);
+    };
+    loadServicos();
+  });
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    setIsLoading(true);
+    try {
+      // Buscar empresas que atendem aos critérios
+      const { data: empresasData, error } = await supabase
+        .from("empresas")
+        .select(`
+          *,
+          empresa_servicos!inner(servico_id),
+          empresa_estados!inner(estado_id)
+        `);
+
+      if (error) throw error;
+
+      // Filtrar empresas que oferecem os serviços solicitados
+      const empresasFiltradas = empresasData?.filter((empresa: any) => {
+        const servicosEmpresa = empresa.empresa_servicos.map((es: any) => es.servico_id);
+        return values.servicos.every((servicoId) => servicosEmpresa.includes(servicoId));
+      }) || [];
+
+      // Rankear empresas (priorizar menor número de chamadas se for MG)
+      const empresasRankeadas: EmpresaRankeada[] = empresasFiltradas
+        .map((empresa: any) => {
+          let score = 100;
+          let motivo = "Atende aos serviços solicitados";
+
+          // Se for Minas Gerais, priorizar empresas com menos chamadas
+          if (values.estado.toUpperCase() === "MG") {
+            score -= empresa.chamadas_count * 5;
+            motivo = `${motivo}. Empresa com ${empresa.chamadas_count} chamadas anteriores (prioridade para menos chamadas em MG)`;
+          }
+
+          return {
+            id: empresa.id,
+            nome: empresa.nome,
+            endereco: empresa.endereco,
+            email: empresa.email,
+            telefone: empresa.telefone,
+            responsavel: empresa.responsavel,
+            chamadas_count: empresa.chamadas_count,
+            score,
+            motivo,
+          };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      onResultados(empresasRankeadas);
+
+      if (empresasRankeadas.length === 0) {
+        toast.error("Nenhuma empresa encontrada com os critérios especificados");
+      } else {
+        toast.success(`${empresasRankeadas.length} empresa(s) encontrada(s)`);
+      }
+    } catch (error) {
+      console.error("Erro ao buscar empresas:", error);
+      toast.error("Erro ao buscar empresas. Tente novamente.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <div className="grid gap-6 md:grid-cols-3">
+          <FormField
+            control={form.control}
+            name="endereco"
+            render={({ field }) => (
+              <FormItem className="md:col-span-2">
+                <FormLabel>Endereço da Vistoria</FormLabel>
+                <FormControl>
+                  <Input placeholder="Rua, Número, Bairro..." {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="municipio"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Município</FormLabel>
+                <FormControl>
+                  <Input placeholder="Ex: Belo Horizonte" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        <FormField
+          control={form.control}
+          name="estado"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Estado (Sigla)</FormLabel>
+              <FormControl>
+                <Input placeholder="Ex: MG" maxLength={2} {...field} className="uppercase" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="servicos"
+          render={() => (
+            <FormItem>
+              <FormLabel>Serviços Necessários</FormLabel>
+              <div className="grid gap-3 md:grid-cols-2">
+                {servicos.map((servico) => (
+                  <FormField
+                    key={servico.id}
+                    control={form.control}
+                    name="servicos"
+                    render={({ field }) => (
+                      <FormItem className="flex items-center space-x-3 space-y-0">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value?.includes(servico.id)}
+                            onCheckedChange={(checked) => {
+                              return checked
+                                ? field.onChange([...field.value, servico.id])
+                                : field.onChange(field.value?.filter((value) => value !== servico.id));
+                            }}
+                          />
+                        </FormControl>
+                        <FormLabel className="font-normal">{servico.nome}</FormLabel>
+                      </FormItem>
+                    )}
+                  />
+                ))}
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <Button type="submit" className="w-full gap-2" disabled={isLoading}>
+          {isLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Buscando...
+            </>
+          ) : (
+            <>
+              <Search className="h-4 w-4" />
+              Buscar Empresas
+            </>
+          )}
+        </Button>
+      </form>
+    </Form>
+  );
+};
