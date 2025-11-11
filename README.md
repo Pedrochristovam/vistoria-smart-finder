@@ -1,73 +1,91 @@
-# Welcome to your Lovable project
+# Sistema de Vistorias - Gestão de Empresas Credenciadas
 
-## Project info
+Sistema inteligente para automatizar a seleção de empresas credenciadas para vistorias de engenharia. Encontre a empresa ideal com base em localização, serviços e histórico.
 
-**URL**: https://lovable.dev/projects/30931c02-59a0-436b-8fdf-09c53572e6c1
+## Como editar este código?
 
-## How can I edit this code?
+Você pode trabalhar localmente usando sua IDE preferida.
 
-There are several ways of editing your application.
+**Requisitos:**
+- Node.js & npm instalados - [instalar com nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/30931c02-59a0-436b-8fdf-09c53572e6c1) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+**Passos para iniciar:**
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+# Passo 1: Clone o repositório
+git clone https://github.com/Pedrochristovam/vistoria-smart-finder.git
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+# Passo 2: Navegue até o diretório do projeto
+cd vistoria-smart-finder
 
-# Step 3: Install the necessary dependencies.
+# Passo 3: Instale as dependências necessárias
 npm i
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Passo 4: Inicie o servidor de desenvolvimento
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+O servidor será iniciado em `http://localhost:8080` (ou outra porta se 8080 estiver em uso).
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+**Editar arquivos diretamente no GitHub**
 
-**Use GitHub Codespaces**
+- Navegue até o arquivo desejado
+- Clique no botão "Edit" (ícone de lápis) no canto superior direito
+- Faça suas alterações e faça commit
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+**Usar GitHub Codespaces**
 
-## What technologies are used for this project?
+- Navegue até a página principal do repositório
+- Clique no botão "Code" (botão verde) no canto superior direito
+- Selecione a aba "Codespaces"
+- Clique em "New codespace" para iniciar um novo ambiente
+- Edite arquivos diretamente no Codespace e faça commit e push quando terminar
 
-This project is built with:
+## Tecnologias utilizadas
+
+Este projeto é construído com:
 
 - Vite
 - TypeScript
 - React
 - shadcn-ui
 - Tailwind CSS
+- Google Maps API (opcional, para autocompletar endereços e geocodificação)
+- Supabase (banco de dados)
 
-## How can I deploy this project?
+## Configuração do Google Maps API (Opcional)
 
-Simply open [Lovable](https://lovable.dev/projects/30931c02-59a0-436b-8fdf-09c53572e6c1) and click on Share -> Publish.
+Para habilitar o autocompletar de endereços e melhorar a precisão da geocodificação:
 
-## Can I connect a custom domain to my Lovable project?
+1. Copie o arquivo `.env.example` para `.env`:
+   ```sh
+   cp .env.example .env
+   ```
 
-Yes, you can!
+2. Obtenha uma chave da API do Google Maps:
+   - Acesse [Google Cloud Console](https://console.cloud.google.com/)
+   - Crie um novo projeto ou selecione um existente
+   - Ative as APIs necessárias:
+     - **Geocoding API**
+     - **Places API**
+   - Crie uma chave de API em "Credenciais"
+   - Configure restrições de aplicativo para segurança (recomendado)
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+3. Adicione a chave no arquivo `.env`:
+   ```
+   VITE_GOOGLE_MAPS_API_KEY=sua_chave_aqui
+   ```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+**Nota:** Se a chave não for configurada, o sistema usará OpenStreetMap (Nominatim) como fallback, que é gratuito mas pode ser menos preciso.
+
+## Como fazer deploy deste projeto?
+
+Você pode fazer deploy usando qualquer plataforma de hospedagem que suporte aplicações React/Vite, como:
+
+- Vercel
+- Netlify
+- GitHub Pages
+- AWS Amplify
+- Outras plataformas de sua preferência
+
+Certifique-se de configurar as variáveis de ambiente necessárias (como `VITE_GOOGLE_MAPS_API_KEY`) na plataforma escolhida.

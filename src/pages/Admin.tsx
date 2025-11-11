@@ -6,9 +6,16 @@ import { Building2, Plus, ClipboardList } from "lucide-react";
 import { EmpresasList } from "@/components/admin/EmpresasList";
 import { NovaEmpresaForm } from "@/components/admin/NovaEmpresaForm";
 import { HistoricoChamadas } from "@/components/admin/HistoricoChamadas";
+import { useEffect } from "react";
+import { testSupabaseConnection } from "@/lib/test-supabase";
 
 const Admin = () => {
   const [showNovaEmpresa, setShowNovaEmpresa] = useState(false);
+
+  useEffect(() => {
+    // Testar conexão ao carregar a página
+    testSupabaseConnection();
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">

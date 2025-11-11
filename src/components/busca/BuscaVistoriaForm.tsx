@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -8,9 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, MapPin } from "lucide-react";
 import type { EmpresaRankeada } from "@/pages/Index";
-import { geocodeAddress, calculateDistance } from "@/lib/geocoding";
+import { geocodeAddress, calculateDistance, Coordinates } from "@/lib/geocoding";
+import { GoogleMapsAutocomplete } from "./GoogleMapsAutocomplete";
+import { isGoogleMapsEnabled } from "@/lib/google-maps-config";
+import { calculateDistanceAndTime } from "@/lib/google-maps-distance";
+import { defaultServicos } from "@/lib/default-data";
 
 const formSchema = z.object({
   endereco: z.string().min(5, "Endereço deve ter no mínimo 5 caracteres"),
@@ -20,7 +24,7 @@ const formSchema = z.object({
 });
 
 interface BuscaVistoriaFormProps {
-  onResultados: (empresas: EmpresaRankeada[]) => void;
+  onResultados: (empresas: EmpresaRankeada[], coordenadasOrigem?: Coordinates) => void;
 }
 
 export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
@@ -38,16 +42,33 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
   });
 
   // Carregar serviços disponíveis
-  useState(() => {
+  useEffect(() => {
     const loadServicos = async () => {
-      const { data } = await supabase
-        .from("servicos")
-        .select("*")
-        .order("ordem");
-      if (data) setServicos(data);
+      if (!supabase) {
+        console.warn("Supabase não configurado. Usando dados padrão.");
+        // Usar dados padrão quando Supabase não estiver configurado
+        setServicos(defaultServicos);
+        return;
+      }
+      try {
+        const { data } = await supabase
+          .from("servicos")
+          .select("*")
+          .order("ordem");
+        if (data && data.length > 0) {
+          setServicos(data);
+        } else {
+          // Fallback para dados padrão se não houver dados no banco
+          setServicos(defaultServicos);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar serviços:", error);
+        // Usar dados padrão em caso de erro
+        setServicos(defaultServicos);
+      }
     };
     loadServicos();
-  });
+  }, []);
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setIsLoading(true);
@@ -62,39 +83,122 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
         return;
       }
 
-      // Buscar empresas que atendem aos critérios
+      if (!supabase) {
+        toast.error("Supabase não configurado. Configure as variáveis de ambiente no arquivo .env");
+        setIsLoading(false);
+        return;
+      }
+
+      // Buscar o ID do estado selecionado
+      let estadoId: string | null = null;
+      const { data: estadoData } = await supabase
+        .from("estados")
+        .select("id")
+        .eq("sigla", values.estado.toUpperCase())
+        .single();
+
+      if (estadoData) {
+        estadoId = estadoData.id;
+        console.log(`📍 Estado selecionado: ${values.estado} (ID: ${estadoId})`);
+      } else {
+        console.warn(`⚠️ Estado ${values.estado} não encontrado no banco`);
+      }
+
+      // Buscar empresas com seus serviços e estados
       const { data: empresasData, error } = await supabase
         .from("empresas")
         .select(`
           *,
-          empresa_servicos!inner(servico_id),
-          empresa_estados!inner(estado_id)
+          empresa_servicos(servico_id),
+          empresa_estados(estado_id)
         `);
 
-      if (error) throw error;
+      if (error) {
+        console.error("Erro ao buscar empresas:", error);
+        throw error;
+      }
 
-      // Filtrar empresas que oferecem os serviços solicitados
+      console.log("📊 Total de empresas encontradas:", empresasData?.length || 0);
+
+      // Filtrar empresas que oferecem TODOS os serviços solicitados E atendem ao estado
       const empresasFiltradas = empresasData?.filter((empresa: any) => {
-        const servicosEmpresa = empresa.empresa_servicos.map((es: any) => es.servico_id);
-        return values.servicos.every((servicoId) => servicosEmpresa.includes(servicoId));
+        // Verificar serviços - empresa deve ter TODOS os serviços solicitados
+        const servicosEmpresa = (empresa.empresa_servicos || []).map((es: any) => es.servico_id);
+        const temTodosServicos = values.servicos.every((servicoId) => servicosEmpresa.includes(servicoId));
+        
+        if (!temTodosServicos) {
+          return false;
+        }
+
+        // Verificar estados
+        const estadosEmpresa = (empresa.empresa_estados || []).map((ee: any) => ee.estado_id);
+        
+        // Se a empresa não tem estados cadastrados (marcou "Nenhum"), aceitar
+        if (estadosEmpresa.length === 0) {
+          return true;
+        }
+
+        // Se tem estados cadastrados, verificar se atende ao estado solicitado
+        if (estadoId && estadosEmpresa.includes(estadoId)) {
+          return true;
+        }
+
+        return false;
       }) || [];
+
+      console.log("✅ Empresas filtradas:", empresasFiltradas.length);
 
       // Geocodificar endereços das empresas e calcular distâncias
       const empresasComDistancia = await Promise.all(
         empresasFiltradas.map(async (empresa: any) => {
-          const coordsEmpresa = await geocodeAddress(empresa.endereco);
-          let distancia = 0;
+          // Usar coordenadas salvas se disponíveis, senão geocodificar
+          let coordsEmpresa: Coordinates | null = null;
           
-          if (coordsEmpresa && coordsDemanda) {
-            distancia = calculateDistance(coordsDemanda, coordsEmpresa);
+          if (empresa.latitude && empresa.longitude) {
+            coordsEmpresa = {
+              lat: parseFloat(empresa.latitude),
+              lng: parseFloat(empresa.longitude),
+            };
+          } else {
+            coordsEmpresa = await geocodeAddress(empresa.endereco);
+            // Se geocodificou com sucesso, salvar no banco (opcional - pode fazer depois)
           }
 
+          let distancia = 0;
+          let distanciaTexto = "N/A";
+          let tempo = "N/A";
           let score = 100;
           let motivo = "Atende aos serviços solicitados";
+          
+          if (coordsEmpresa && coordsDemanda) {
+            // Calcular distância e tempo usando Google Maps se disponível
+            try {
+              const distanciaResult = await calculateDistanceAndTime(coordsDemanda, coordsEmpresa);
+              
+              if (distanciaResult.distanciaValor > 0) {
+                distancia = distanciaResult.distanciaValor;
+                distanciaTexto = distanciaResult.distancia;
+                tempo = distanciaResult.tempo;
+              } else {
+                // Fallback para cálculo Haversine
+                distancia = calculateDistance(coordsDemanda, coordsEmpresa);
+                distanciaTexto = distancia < 1 ? `${Math.round(distancia * 1000)}m` : `${distancia.toFixed(1)} km`;
+              }
+            } catch (error) {
+              console.warn("Erro ao calcular distância com Google Maps, usando Haversine:", error);
+              // Fallback para cálculo Haversine
+              distancia = calculateDistance(coordsDemanda, coordsEmpresa);
+              distanciaTexto = distancia < 1 ? `${Math.round(distancia * 1000)}m` : `${distancia.toFixed(1)} km`;
+            }
+          } else {
+            // Se não tem coordenadas, ainda pode aparecer mas sem distância
+            console.warn(`⚠️ ${empresa.nome} não tem coordenadas cadastradas`);
+            motivo = `${motivo}. Coordenadas não disponíveis`;
+          }
 
           // Penalizar por distância (quanto mais longe, menor o score)
           score -= distancia * 0.5;
-          motivo = `${motivo}. Localizada a ${distancia.toFixed(1)} km do local da vistoria`;
+          motivo = `${motivo}. Localizada a ${distanciaTexto} do local da vistoria`;
 
           // Se for Minas Gerais, priorizar empresas com menos chamadas
           if (values.estado.toUpperCase() === "MG") {
@@ -113,6 +217,9 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
             score,
             motivo,
             distancia,
+            distanciaTexto,
+            tempo,
+            coordenadas: coordsEmpresa || undefined,
           };
         })
       );
@@ -121,7 +228,7 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
       const empresasRankeadas: EmpresaRankeada[] = empresasComDistancia
         .sort((a, b) => b.score - a.score);
 
-      onResultados(empresasRankeadas);
+      onResultados(empresasRankeadas, coordsDemanda);
 
       if (empresasRankeadas.length === 0) {
         toast.error("Nenhuma empresa encontrada com os critérios especificados");
@@ -145,9 +252,23 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
             name="endereco"
             render={({ field }) => (
               <FormItem className="md:col-span-2">
-                <FormLabel>Endereço da Vistoria</FormLabel>
+                <FormLabel className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  Endereço da Vistoria
+                  {isGoogleMapsEnabled() && (
+                    <span className="text-xs text-muted-foreground font-normal">(com autocompletar)</span>
+                  )}
+                </FormLabel>
                 <FormControl>
-                  <Input placeholder="Rua, Número, Bairro..." {...field} />
+                  {isGoogleMapsEnabled() ? (
+                    <GoogleMapsAutocomplete
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="Digite o endereço completo..."
+                    />
+                  ) : (
+                    <Input placeholder="Rua, Número, Bairro..." {...field} />
+                  )}
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -161,7 +282,7 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
               <FormItem>
                 <FormLabel>Município</FormLabel>
                 <FormControl>
-                  <Input placeholder="Ex: Belo Horizonte" {...field} />
+                  <Input placeholder="Ex: Belo Horizonte" {...field} className="shadow-sm" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -176,7 +297,7 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
             <FormItem>
               <FormLabel>Estado (Sigla)</FormLabel>
               <FormControl>
-                <Input placeholder="Ex: MG" maxLength={2} {...field} className="uppercase" />
+                <Input placeholder="Ex: MG" maxLength={2} {...field} className="uppercase shadow-sm" />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -188,15 +309,15 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
           name="servicos"
           render={() => (
             <FormItem>
-              <FormLabel>Serviços Necessários</FormLabel>
-              <div className="grid gap-3 md:grid-cols-2">
+              <FormLabel className="text-base font-semibold">Serviços Necessários</FormLabel>
+              <div className="grid gap-3 md:grid-cols-2 p-4 rounded-lg bg-secondary/20 border border-secondary/30">
                 {servicos.map((servico) => (
                   <FormField
                     key={servico.id}
                     control={form.control}
                     name="servicos"
                     render={({ field }) => (
-                      <FormItem className="flex items-center space-x-3 space-y-0">
+                      <FormItem className="flex items-center space-x-3 space-y-0 rounded-md p-2 hover:bg-secondary/40 transition-colors">
                         <FormControl>
                           <Checkbox
                             checked={field.value?.includes(servico.id)}
@@ -207,7 +328,7 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
                             }}
                           />
                         </FormControl>
-                        <FormLabel className="font-normal">{servico.nome}</FormLabel>
+                        <FormLabel className="font-normal cursor-pointer">{servico.nome}</FormLabel>
                       </FormItem>
                     )}
                   />
@@ -218,16 +339,21 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
           )}
         />
 
-        <Button type="submit" className="w-full gap-2" disabled={isLoading}>
+        <Button 
+          type="submit" 
+          className="w-full gap-2 h-11 text-base font-semibold shadow-lg hover:shadow-xl transition-all" 
+          disabled={isLoading}
+          size="lg"
+        >
           {isLoading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Buscando...
+              Buscando empresas próximas...
             </>
           ) : (
             <>
               <Search className="h-4 w-4" />
-              Buscar Empresas
+              Buscar Empresas Próximas
             </>
           )}
         </Button>

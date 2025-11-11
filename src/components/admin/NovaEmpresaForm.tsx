@@ -11,7 +11,9 @@ import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, X } from "lucide-react";
+import { Loader2, X, MapPin } from "lucide-react";
+import { geocodeAddress } from "@/lib/geocoding";
+import { defaultServicos, defaultRegioesMG, defaultEstados } from "@/lib/default-data";
 
 const formSchema = z.object({
   ordem: z.coerce.number().min(1, "Ordem deve ser maior que 0"),
@@ -23,7 +25,7 @@ const formSchema = z.object({
   responsavel: z.string().min(3, "Nome do responsável é obrigatório"),
   servicos: z.array(z.string()).min(1, "Selecione pelo menos um serviço"),
   regioes_mg: z.array(z.string()),
-  estados: z.array(z.string()).min(1, "Selecione pelo menos um estado"),
+  estados: z.array(z.string()), // Opcional - pode ser vazio ou ter "nenhum"
 });
 
 interface NovaEmpresaFormProps {
@@ -54,15 +56,33 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
 
   useEffect(() => {
     const loadData = async () => {
-      const [servicosRes, regioesRes, estadosRes] = await Promise.all([
-        supabase.from("servicos").select("*").order("ordem"),
-        supabase.from("regioes_mg").select("*").order("nome"),
-        supabase.from("estados").select("*").order("sigla"),
-      ]);
-      
-      if (servicosRes.data) setServicos(servicosRes.data);
-      if (regioesRes.data) setRegioesMg(regioesRes.data);
-      if (estadosRes.data) setEstados(estadosRes.data);
+      if (!supabase) {
+        console.warn("Supabase não configurado. Usando dados padrão.");
+        // Usar dados padrão quando Supabase não estiver configurado
+        setServicos(defaultServicos);
+        setRegioesMg(defaultRegioesMG);
+        setEstados(defaultEstados);
+        return;
+      }
+
+      try {
+        const [servicosRes, regioesRes, estadosRes] = await Promise.all([
+          supabase.from("servicos").select("*").order("ordem"),
+          supabase.from("regioes_mg").select("*").order("nome"),
+          supabase.from("estados").select("*").order("sigla"),
+        ]);
+        
+        // Usar dados do banco se disponíveis, senão usar padrão
+        setServicos(servicosRes.data && servicosRes.data.length > 0 ? servicosRes.data : defaultServicos);
+        setRegioesMg(regioesRes.data && regioesRes.data.length > 0 ? regioesRes.data : defaultRegioesMG);
+        setEstados(estadosRes.data && estadosRes.data.length > 0 ? estadosRes.data : defaultEstados);
+      } catch (error) {
+        console.error("Erro ao carregar dados:", error);
+        // Usar dados padrão em caso de erro
+        setServicos(defaultServicos);
+        setRegioesMg(defaultRegioesMG);
+        setEstados(defaultEstados);
+      }
     };
     loadData();
   }, []);
@@ -70,21 +90,105 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setIsLoading(true);
     try {
-      // Inserir empresa
+      if (!supabase) {
+        toast.error(
+          "Supabase não configurado. Para cadastrar empresas, você precisa:\n" +
+          "1. Criar um projeto em https://app.supabase.com\n" +
+          "2. Adicionar VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY no arquivo .env\n" +
+          "3. Executar as migrations no Supabase",
+          { duration: 8000 }
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Geocodificar endereço para obter coordenadas
+      toast.info("Geocodificando endereço...");
+      console.log("🔍 Tentando geocodificar:", values.endereco);
+      
+      // Tentar geocodificar o endereço fornecido
+      let coords = await geocodeAddress(values.endereco);
+      console.log("📍 Resultado primeira tentativa:", coords);
+      
+      // Se não encontrou, tentar variações do endereço
+      if (!coords) {
+        // Tentar com "Brasil" se não tiver
+        if (!values.endereco.toLowerCase().includes("brasil")) {
+          const enderecoComBrasil = `${values.endereco}, Brasil`;
+          console.log("🔍 Tentativa 2 - Com Brasil:", enderecoComBrasil);
+          coords = await geocodeAddress(enderecoComBrasil);
+          console.log("📍 Resultado segunda tentativa:", coords);
+        }
+        
+        // Tentar sem abreviações
+        if (!coords) {
+          const enderecoSemAbrev = values.endereco
+            .replace(/\bB\.\b/gi, "Bairro")
+            .replace(/\bR\.\b/gi, "Rua")
+            .replace(/\bAv\.\b/gi, "Avenida");
+          if (enderecoSemAbrev !== values.endereco) {
+            console.log("🔍 Tentativa 3 - Sem abreviações:", enderecoSemAbrev);
+            coords = await geocodeAddress(enderecoSemAbrev);
+            console.log("📍 Resultado terceira tentativa:", coords);
+          }
+        }
+        
+        // Tentar apenas com cidade e estado
+        if (!coords) {
+          const match = values.endereco.match(/(.+?),\s*([^,]+),\s*([A-Z]{2})/);
+          if (match) {
+            const [, rua, cidade, estado] = match;
+            const enderecoSimplificado = `${rua.trim()}, ${cidade.trim()}, ${estado}, Brasil`;
+            console.log("🔍 Tentativa 4 - Simplificado:", enderecoSimplificado);
+            coords = await geocodeAddress(enderecoSimplificado);
+            console.log("📍 Resultado quarta tentativa:", coords);
+          }
+        }
+      }
+      
+      if (!coords) {
+        console.warn("⚠️ Não foi possível geocodificar o endereço");
+        
+        // Perguntar se deseja continuar sem coordenadas
+        const continuar = window.confirm(
+          "Não foi possível localizar o endereço automaticamente.\n\n" +
+          "Deseja continuar o cadastro sem coordenadas?\n\n" +
+          "A empresa será cadastrada, mas não aparecerá nas buscas por proximidade até que o endereço seja corrigido."
+        );
+        
+        if (!continuar) {
+          setIsLoading(false);
+          return;
+        }
+        
+        // Continuar sem coordenadas (será null)
+        toast.warning("Empresa será cadastrada sem coordenadas. Você pode editar depois.");
+      } else {
+        console.log("✅ Coordenadas obtidas:", coords);
+        toast.success("Endereço localizado com sucesso!");
+      }
+
+      // Inserir empresa com ou sem coordenadas
+      const empresaDataToInsert: any = {
+        ordem: values.ordem,
+        numero_contrato: values.numero_contrato,
+        nome: values.nome,
+        endereco: values.endereco,
+        email: values.email,
+        telefone: values.telefone,
+        responsavel: values.responsavel,
+        chamadas_count: 0,
+      };
+      
+      // Adicionar coordenadas apenas se foram obtidas
+      if (coords) {
+        empresaDataToInsert.latitude = coords.lat;
+        empresaDataToInsert.longitude = coords.lng;
+      }
+      
       const { data: empresaData, error: empresaError } = await supabase
         .from("empresas")
-        .insert([
-          {
-            ordem: values.ordem,
-            numero_contrato: values.numero_contrato,
-            nome: values.nome,
-            endereco: values.endereco,
-            email: values.email,
-            telefone: values.telefone,
-            responsavel: values.responsavel,
-            chamadas_count: 0,
-          },
-        ])
+        .insert([empresaDataToInsert])
         .select()
         .single();
 
@@ -116,17 +220,21 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
         if (regioesError) throw regioesError;
       }
 
-      // Inserir relações de estados
-      const estadosInserts = values.estados.map((estadoId) => ({
-        empresa_id: empresaData.id,
-        estado_id: estadoId,
-      }));
+      // Inserir relações de estados (apenas se não for "nenhum" e houver estados selecionados)
+      const estadosParaInserir = values.estados.filter((estadoId) => estadoId !== "nenhum");
       
-      const { error: estadosError } = await supabase
-        .from("empresa_estados")
-        .insert(estadosInserts);
-      
-      if (estadosError) throw estadosError;
+      if (estadosParaInserir.length > 0) {
+        const estadosInserts = estadosParaInserir.map((estadoId) => ({
+          empresa_id: empresaData.id,
+          estado_id: estadoId,
+        }));
+        
+        const { error: estadosError } = await supabase
+          .from("empresa_estados")
+          .insert(estadosInserts);
+        
+        if (estadosError) throw estadosError;
+      }
 
       toast.success("Empresa cadastrada com sucesso!");
       form.reset();
@@ -204,10 +312,20 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
             name="endereco"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Endereço Completo</FormLabel>
+                <FormLabel className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4 text-primary" />
+                  Endereço Completo
+                </FormLabel>
                 <FormControl>
-                  <Textarea {...field} rows={2} />
+                  <Textarea 
+                    {...field} 
+                    rows={3}
+                    placeholder="Ex: Rua Rafael Magalhães, 179, B. Santo Antonio, Belo Horizonte, MG"
+                  />
                 </FormControl>
+                <p className="text-xs text-muted-foreground">
+                  💡 Dica: Inclua rua, número, bairro, cidade e estado para melhor precisão
+                </p>
                 <FormMessage />
               </FormItem>
             )}
@@ -345,26 +463,63 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
               render={() => (
                 <FormItem>
                   <div className="grid gap-3 grid-cols-2 md:grid-cols-4 lg:grid-cols-6">
+                    {/* Opção "Nenhum" */}
+                    <FormField
+                      control={form.control}
+                      name="estados"
+                      render={({ field }) => (
+                        <FormItem className="flex items-center space-x-3 space-y-0 rounded-lg border p-3 hover:bg-secondary/50 bg-secondary/20">
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value?.length === 0 || field.value?.includes("nenhum")}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  // Se marcar "Nenhum", limpar todos os outros
+                                  field.onChange(["nenhum"]);
+                                } else {
+                                  // Se desmarcar "Nenhum", limpar tudo
+                                  field.onChange([]);
+                                }
+                              }}
+                            />
+                          </FormControl>
+                          <FormLabel className="cursor-pointer text-xs font-normal font-semibold">Nenhum</FormLabel>
+                        </FormItem>
+                      )}
+                    />
+                    {/* Estados */}
                     {estados.map((estado) => (
                       <FormField
                         key={estado.id}
                         control={form.control}
                         name="estados"
-                        render={({ field }) => (
-                          <FormItem className="flex items-center space-x-3 space-y-0 rounded-lg border p-3 hover:bg-secondary/50">
-                            <FormControl>
-                              <Checkbox
-                                checked={field.value?.includes(estado.id)}
-                                onCheckedChange={(checked) => {
-                                  return checked
-                                    ? field.onChange([...field.value, estado.id])
-                                    : field.onChange(field.value?.filter((value) => value !== estado.id));
-                                }}
-                              />
-                            </FormControl>
-                            <FormLabel className="cursor-pointer text-xs font-normal">{estado.sigla}</FormLabel>
-                          </FormItem>
-                        )}
+                        render={({ field }) => {
+                          const isNenhumSelected = field.value?.includes("nenhum");
+                          return (
+                            <FormItem className="flex items-center space-x-3 space-y-0 rounded-lg border p-3 hover:bg-secondary/50">
+                              <FormControl>
+                                <Checkbox
+                                  checked={field.value?.includes(estado.id)}
+                                  disabled={isNenhumSelected}
+                                  onCheckedChange={(checked) => {
+                                    // Se "Nenhum" estiver selecionado, não permitir selecionar estados
+                                    if (isNenhumSelected && checked) {
+                                      return;
+                                    }
+                                    // Remover "nenhum" se selecionar qualquer estado
+                                    const newValue = field.value?.filter((v) => v !== "nenhum") || [];
+                                    return checked
+                                      ? field.onChange([...newValue, estado.id])
+                                      : field.onChange(newValue.filter((value) => value !== estado.id));
+                                  }}
+                                />
+                              </FormControl>
+                              <FormLabel className={`cursor-pointer text-xs font-normal ${isNenhumSelected ? "opacity-50" : ""}`}>
+                                {estado.sigla}
+                              </FormLabel>
+                            </FormItem>
+                          );
+                        }}
                       />
                     ))}
                   </div>

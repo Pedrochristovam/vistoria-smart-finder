@@ -16,53 +16,63 @@ export interface EmpresaRankeada {
   score: number;
   motivo: string;
   distancia?: number;
+  distanciaTexto?: string;
+  tempo?: string;
+  coordenadas?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 const Index = () => {
   const [resultados, setResultados] = useState<EmpresaRankeada[]>([]);
   const [buscaRealizada, setBuscaRealizada] = useState(false);
+  const [coordenadasOrigem, setCoordenadasOrigem] = useState<{ lat: number; lng: number } | undefined>();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20">
-      <header className="border-b bg-card/80 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-6">
+    <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/10">
+      <header className="sticky top-0 z-50 border-b bg-card/95 backdrop-blur-md shadow-sm">
+        <div className="container mx-auto px-4 py-4 sm:py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20 transition-transform hover:scale-105">
                 <Building2 className="h-7 w-7 text-primary-foreground" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-foreground">Sistema de Vistorias</h1>
+                <h1 className="text-2xl font-bold text-foreground tracking-tight">Sistema de Vistorias</h1>
                 <p className="text-sm text-muted-foreground">Encontre a empresa ideal para sua vistoria</p>
               </div>
             </div>
-            <Button asChild variant="outline" className="gap-2">
+            <Button asChild variant="outline" className="gap-2 shadow-sm hover:shadow-md transition-all">
               <a href="/admin">
                 <Settings className="h-4 w-4" />
-                Administração
+                <span className="hidden sm:inline">Administração</span>
               </a>
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-12">
+      <main className="container mx-auto px-4 py-8 sm:py-12">
         <div className="mx-auto max-w-5xl space-y-8">
-          <Card className="border-2 p-8 shadow-lg">
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-foreground">Nova Solicitação de Vistoria</h2>
-              <p className="text-sm text-muted-foreground">Preencha os dados da demanda para encontrar as empresas mais adequadas</p>
+          <Card className="border-2 border-primary/10 p-6 sm:p-8 shadow-xl shadow-primary/5 bg-card/50 backdrop-blur-sm">
+            <div className="mb-6 space-y-2">
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">Nova Solicitação de Vistoria</h2>
+              <p className="text-sm text-muted-foreground">Preencha os dados da demanda para encontrar as empresas mais adequadas e próximas</p>
             </div>
             <BuscaVistoriaForm 
-              onResultados={(empresas) => {
+              onResultados={(empresas, coords) => {
                 setResultados(empresas);
+                setCoordenadasOrigem(coords);
                 setBuscaRealizada(true);
               }}
             />
           </Card>
 
           {buscaRealizada && (
-            <ResultadosLista empresas={resultados} />
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <ResultadosLista empresas={resultados} coordenadasOrigem={coordenadasOrigem} />
+            </div>
           )}
         </div>
       </main>
