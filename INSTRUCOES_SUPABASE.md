@@ -70,3 +70,6 @@ Para verificar se está funcionando:
 2. Você deve ver as tabelas: `empresas`, `servicos`, `estados`, etc.
 3. Tente cadastrar uma empresa no sistema
 
+
+
+

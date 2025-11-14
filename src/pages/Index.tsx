@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Building2, Settings } from "lucide-react";
@@ -22,12 +23,19 @@ export interface EmpresaRankeada {
     lat: number;
     lng: number;
   };
+  servicos?: Array<{ id: string; nome: string }>;
 }
 
 const Index = () => {
   const [resultados, setResultados] = useState<EmpresaRankeada[]>([]);
   const [buscaRealizada, setBuscaRealizada] = useState(false);
   const [coordenadasOrigem, setCoordenadasOrigem] = useState<{ lat: number; lng: number } | undefined>();
+  const [dadosBusca, setDadosBusca] = useState<{
+    endereco: string;
+    municipio: string;
+    estado: string;
+    servicos: string[];
+  } | undefined>();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-secondary/10">
@@ -44,10 +52,10 @@ const Index = () => {
               </div>
             </div>
             <Button asChild variant="outline" className="gap-2 shadow-sm hover:shadow-md transition-all">
-              <a href="/admin">
+              <Link to="/admin">
                 <Settings className="h-4 w-4" />
                 <span className="hidden sm:inline">Administração</span>
-              </a>
+              </Link>
             </Button>
           </div>
         </div>
@@ -61,9 +69,10 @@ const Index = () => {
               <p className="text-sm text-muted-foreground">Preencha os dados da demanda para encontrar as empresas mais adequadas e próximas</p>
             </div>
             <BuscaVistoriaForm 
-              onResultados={(empresas, coords) => {
+              onResultados={(empresas, coords, dados) => {
                 setResultados(empresas);
                 setCoordenadasOrigem(coords);
+                setDadosBusca(dados);
                 setBuscaRealizada(true);
               }}
             />
@@ -71,7 +80,14 @@ const Index = () => {
 
           {buscaRealizada && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <ResultadosLista empresas={resultados} coordenadasOrigem={coordenadasOrigem} />
+              <ResultadosLista 
+                empresas={resultados} 
+                coordenadasOrigem={coordenadasOrigem}
+                enderecoDemanda={dadosBusca?.endereco}
+                municipio={dadosBusca?.municipio}
+                estado={dadosBusca?.estado}
+                servicosSolicitados={dadosBusca?.servicos}
+              />
             </div>
           )}
         </div>

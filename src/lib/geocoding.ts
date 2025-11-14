@@ -43,24 +43,73 @@ async function geocodeWithGoogleMapsREST(address: string): Promise<Coordinates |
 }
 
 /**
+ * Normaliza e limpa endereço para melhor geocodificação
+ */
+function normalizeAddress(address: string): string[] {
+  let cleaned = address.trim().replace(/\s+/g, " ");
+  
+  // Remover CEP se presente (formato: CEP 35.680-452 ou CEP 35680-452)
+  cleaned = cleaned.replace(/\bCEP\s*[\d.\-]+\b/gi, "").trim();
+  
+  // Expandir abreviações comuns
+  cleaned = cleaned
+    .replace(/\bB\.\b/gi, "Bairro")
+    .replace(/\bR\.\b/gi, "Rua")
+    .replace(/\bAv\.\b/gi, "Avenida")
+    .replace(/\bAl\.\b/gi, "Alameda")
+    .replace(/\bPç\.\b/gi, "Praça")
+    .replace(/\bPr\.\b/gi, "Praça");
+  
+  // Criar variações do endereço
+  const variations: string[] = [cleaned];
+  
+  // Se tem formato cidade/estado (ex: Itaúna/MG), criar variações
+  const cidadeEstadoMatch = cleaned.match(/(.+?)\s*\/\s*([A-Z]{2})\b/);
+  if (cidadeEstadoMatch) {
+    const [, cidade, estado] = cidadeEstadoMatch;
+    // Variação 1: cidade, estado
+    variations.push(cleaned.replace(/\s*\/\s*([A-Z]{2})\b/, `, $1`));
+    // Variação 2: cidade, estado, Brasil
+    variations.push(cleaned.replace(/\s*\/\s*([A-Z]{2})\b/, `, $1, Brasil`));
+  } else {
+    // Se não tem "Brasil" no final, adicionar
+    if (!cleaned.toLowerCase().includes("brasil")) {
+      variations.push(`${cleaned}, Brasil`);
+    }
+  }
+  
+  // Remover vírgulas duplicadas e espaços extras
+  return variations.map(v => v.replace(/,\s*,/g, ",").replace(/\s+/g, " ").trim());
+}
+
+/**
  * Convert address to coordinates using Google Maps API REST or fallback to OpenStreetMap
  */
 export async function geocodeAddress(address: string): Promise<Coordinates | null> {
-  // Normalizar endereço - remover espaços extras e garantir formato
-  const normalizedAddress = address.trim().replace(/\s+/g, " ");
+  // Normalizar endereço e criar variações
+  const addressVariations = normalizeAddress(address);
   
   // Try Google Maps REST API first if available
   if (isGoogleMapsEnabled()) {
-    const coords = await geocodeWithGoogleMapsREST(normalizedAddress);
-    if (coords) {
-      return coords;
+    for (const variation of addressVariations) {
+      const coords = await geocodeWithGoogleMapsREST(variation);
+      if (coords) {
+        return coords;
+      }
     }
     // Se Google Maps falhou, tentar OpenStreetMap
     console.log("🔄 Tentando fallback para OpenStreetMap...");
   }
 
-  // Fallback to OpenStreetMap
-  return geocodeWithOpenStreetMap(normalizedAddress);
+  // Fallback to OpenStreetMap com todas as variações
+  for (const variation of addressVariations) {
+    const coords = await geocodeWithOpenStreetMap(variation);
+    if (coords) {
+      return coords;
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -68,49 +117,33 @@ export async function geocodeAddress(address: string): Promise<Coordinates | nul
  */
 async function geocodeWithOpenStreetMap(address: string): Promise<Coordinates | null> {
   try {
-    // Remover "Brasil" se estiver no final (pode confundir a busca)
-    let searchAddress = address.replace(/,\s*Brasil$/i, "").trim();
+    const encodedAddress = encodeURIComponent(address);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=3&countrycodes=br&addressdetails=1`;
     
-    // Tentar diferentes variações do endereço
-    const variations = [
-      searchAddress,
-      `${searchAddress}, Brasil`,
-      searchAddress.replace(/\bB\.\b/gi, "Bairro"),
-      searchAddress.replace(/\bR\.\b/gi, "Rua"),
-    ];
-    
-    for (const variation of variations) {
-      const encodedAddress = encodeURIComponent(variation);
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=3&countrycodes=br&addressdetails=1`;
-      
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'InspectionSystem/1.0',
-          'Accept-Language': 'pt-BR,pt,en'
-        }
-      });
-      
-      const data = await response.json();
-      
-      if (data && data.length > 0) {
-        // Procurar resultado mais relevante (que tenha cidade/estado)
-        const bestMatch = data.find((item: any) => 
-          item.address && (item.address.city || item.address.town || item.address.state)
-        ) || data[0];
-        
-        console.log("✅ Endereço localizado via OpenStreetMap:", bestMatch.display_name);
-        console.log("📍 Coordenadas:", bestMatch.lat, bestMatch.lon);
-        return {
-          lat: parseFloat(bestMatch.lat),
-          lng: parseFloat(bestMatch.lon),
-        };
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'InspectionSystem/1.0',
+        'Accept-Language': 'pt-BR,pt,en'
       }
+    });
+    
+    const data = await response.json();
+    
+    if (data && data.length > 0) {
+      // Procurar resultado mais relevante (que tenha cidade/estado)
+      const bestMatch = data.find((item: any) => 
+        item.address && (item.address.city || item.address.town || item.address.state)
+      ) || data[0];
       
-      // Aguardar um pouco entre tentativas (rate limiting do Nominatim)
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log("✅ Endereço localizado via OpenStreetMap:", bestMatch.display_name);
+      console.log("📍 Coordenadas:", bestMatch.lat, bestMatch.lon);
+      return {
+        lat: parseFloat(bestMatch.lat),
+        lng: parseFloat(bestMatch.lon),
+      };
     }
     
-    console.warn("⚠️ Endereço não encontrado após todas as variações:", searchAddress);
+    console.warn("⚠️ Endereço não encontrado:", address);
     return null;
   } catch (error) {
     console.error("Erro ao geocodificar endereço:", error);

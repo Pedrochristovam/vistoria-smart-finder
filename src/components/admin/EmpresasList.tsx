@@ -3,8 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { EditarEmpresaForm } from "./EditarEmpresaForm";
 
 interface Empresa {
   id: string;
@@ -16,11 +17,15 @@ interface Empresa {
   telefone: string;
   responsavel: string;
   chamadas_count: number;
+  latitude?: string | null;
+  longitude?: string | null;
 }
 
 export const EmpresasList = () => {
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [empresaEditando, setEmpresaEditando] = useState<Empresa | null>(null);
+  const [dialogAberto, setDialogAberto] = useState(false);
 
   const loadEmpresas = async () => {
     setIsLoading(true);
@@ -85,7 +90,7 @@ export const EmpresasList = () => {
             <TableHead>Email</TableHead>
             <TableHead>Telefone</TableHead>
             <TableHead className="text-center">Chamadas</TableHead>
-            <TableHead className="w-20"></TableHead>
+            <TableHead className="w-32 text-center">Ações</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -102,19 +107,42 @@ export const EmpresasList = () => {
                 <Badge variant="secondary">{empresa.chamadas_count}</Badge>
               </TableCell>
               <TableCell>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => deleteEmpresa(empresa.id)}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      setEmpresaEditando(empresa);
+                      setDialogAberto(true);
+                    }}
+                    className="text-primary hover:text-primary"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => deleteEmpresa(empresa.id)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+
+      <EditarEmpresaForm
+        empresa={empresaEditando}
+        open={dialogAberto}
+        onOpenChange={setDialogAberto}
+        onSuccess={() => {
+          loadEmpresas();
+          setEmpresaEditando(null);
+        }}
+      />
     </div>
   );
 };

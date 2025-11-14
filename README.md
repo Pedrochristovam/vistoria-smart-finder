@@ -80,7 +80,21 @@ Para habilitar o autocompletar de endereços e melhorar a precisão da geocodifi
 
 ## Como fazer deploy deste projeto?
 
-Você pode fazer deploy usando qualquer plataforma de hospedagem que suporte aplicações React/Vite, como:
+### 🚀 Deploy no Render (Recomendado)
+
+Para fazer deploy no Render, siga o guia completo passo a passo:
+
+📖 **[Guia completo de deploy no Render](./DEPLOY_RENDER.md)**
+
+Este guia inclui:
+- Instruções detalhadas passo a passo
+- Configuração de variáveis de ambiente
+- Solução de problemas comuns
+- Dicas de otimização e segurança
+
+### Outras plataformas
+
+Você também pode fazer deploy usando outras plataformas de hospedagem que suportem aplicações React/Vite:
 
 - Vercel
 - Netlify
@@ -88,4 +102,7 @@ Você pode fazer deploy usando qualquer plataforma de hospedagem que suporte apl
 - AWS Amplify
 - Outras plataformas de sua preferência
 
-Certifique-se de configurar as variáveis de ambiente necessárias (como `VITE_GOOGLE_MAPS_API_KEY`) na plataforma escolhida.
+Certifique-se de configurar as variáveis de ambiente necessárias na plataforma escolhida:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+- `VITE_GOOGLE_MAPS_API_KEY` (opcional)

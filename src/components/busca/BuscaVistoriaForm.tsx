@@ -17,14 +17,23 @@ import { calculateDistanceAndTime } from "@/lib/google-maps-distance";
 import { defaultServicos } from "@/lib/default-data";
 
 const formSchema = z.object({
-  endereco: z.string().min(5, "Endereço deve ter no mínimo 5 caracteres"),
-  municipio: z.string().min(2, "Município é obrigatório"),
-  estado: z.string().length(2, "Sigla do estado (ex: MG)"),
+  endereco: z.string().min(10, "Endereço deve ter no mínimo 10 caracteres"),
+  municipio: z.string().min(1, "Município é obrigatório"),
+  estado: z.string().min(2, "Estado é obrigatório").max(2, "Digite apenas a sigla do estado"),
   servicos: z.array(z.string()).min(1, "Selecione pelo menos um serviço"),
 });
 
 interface BuscaVistoriaFormProps {
-  onResultados: (empresas: EmpresaRankeada[], coordenadasOrigem?: Coordinates) => void;
+  onResultados: (
+    empresas: EmpresaRankeada[], 
+    coordenadasOrigem?: Coordinates,
+    dadosBusca?: {
+      endereco: string;
+      municipio: string;
+      estado: string;
+      servicos: string[];
+    }
+  ) => void;
 }
 
 export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
@@ -70,12 +79,75 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
     loadServicos();
   }, []);
 
+  // Extrair município e estado do endereço completo se não estiverem preenchidos
+  const extrairMunicipioEstado = (endereco: string): { municipio: string; estado: string } => {
+    // Padrão: cidade/estado (ex: Itaúna/MG)
+    const cidadeEstadoMatch = endereco.match(/([^,]+?)\s*\/\s*([A-Z]{2})\b/);
+    if (cidadeEstadoMatch) {
+      return {
+        municipio: cidadeEstadoMatch[1].trim(),
+        estado: cidadeEstadoMatch[2].trim().toUpperCase()
+      };
+    }
+    
+    // Padrão: cidade, estado (ex: Itaúna, MG)
+    const cidadeEstadoComMatch = endereco.match(/([^,]+?),\s*([A-Z]{2})\b/);
+    if (cidadeEstadoComMatch) {
+      return {
+        municipio: cidadeEstadoComMatch[1].trim(),
+        estado: cidadeEstadoComMatch[2].trim().toUpperCase()
+      };
+    }
+    
+    return { municipio: "", estado: "" };
+  };
+
+  // Auto-preenchimento de município e estado quando endereço completo é colado
+  const handleEnderecoChange = (value: string) => {
+    // Se município ou estado estão vazios, tentar extrair do endereço
+    const municipioAtual = form.getValues("municipio");
+    const estadoAtual = form.getValues("estado");
+    
+    if ((!municipioAtual || !estadoAtual || estadoAtual === "MG") && value.length > 10) {
+      const extraido = extrairMunicipioEstado(value);
+      if (extraido.municipio && extraido.estado) {
+        if (!municipioAtual) {
+          form.setValue("municipio", extraido.municipio);
+        }
+        if (!estadoAtual || estadoAtual === "MG") {
+          form.setValue("estado", extraido.estado);
+        }
+      }
+    }
+  };
+
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setIsLoading(true);
     try {
+      // Se o endereço parece completo e município/estado não estão preenchidos, tentar extrair
+      let municipioFinal = values.municipio;
+      let estadoFinal = values.estado;
+      let enderecoParaGeocodificar = values.endereco;
+      
+      // Se o endereço contém cidade/estado e os campos estão vazios, extrair
+      if ((!municipioFinal || !estadoFinal) && values.endereco) {
+        const extraido = extrairMunicipioEstado(values.endereco);
+        if (extraido.municipio && extraido.estado) {
+          municipioFinal = municipioFinal || extraido.municipio;
+          estadoFinal = estadoFinal || extraido.estado;
+        }
+      }
+      
+      // Se ainda não tem município/estado, usar o endereço completo diretamente
+      if (municipioFinal && estadoFinal) {
+        enderecoParaGeocodificar = `${values.endereco}, ${municipioFinal}, ${estadoFinal}, Brasil`;
+      } else {
+        // Usar endereço completo como está (já pode conter tudo)
+        enderecoParaGeocodificar = values.endereco;
+      }
+      
       // Geocodificar endereço da demanda
-      const enderecoCompleto = `${values.endereco}, ${values.municipio}, ${values.estado}, Brasil`;
-      const coordsDemanda = await geocodeAddress(enderecoCompleto);
+      const coordsDemanda = await geocodeAddress(enderecoParaGeocodificar);
 
       if (!coordsDemanda) {
         toast.error("Não foi possível localizar o endereço. Verifique os dados informados.");
@@ -89,19 +161,22 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
         return;
       }
 
-      // Buscar o ID do estado selecionado
+      // Buscar o ID do estado selecionado (usar estado extraído ou o do formulário)
       let estadoId: string | null = null;
-      const { data: estadoData } = await supabase
-        .from("estados")
-        .select("id")
-        .eq("sigla", values.estado.toUpperCase())
-        .single();
-
-      if (estadoData) {
-        estadoId = estadoData.id;
-        console.log(`📍 Estado selecionado: ${values.estado} (ID: ${estadoId})`);
-      } else {
-        console.warn(`⚠️ Estado ${values.estado} não encontrado no banco`);
+      const estadoParaBuscar = estadoFinal || values.estado;
+      if (estadoParaBuscar && supabase) {
+        const { data: estadoData } = await supabase
+          .from("estados")
+          .select("id")
+          .eq("sigla", estadoParaBuscar.toUpperCase())
+          .single();
+        
+        if (estadoData) {
+          estadoId = estadoData.id;
+          console.log(`📍 Estado selecionado: ${estadoParaBuscar} (ID: ${estadoId})`);
+        } else {
+          console.warn(`⚠️ Estado ${estadoParaBuscar} não encontrado no banco`);
+        }
       }
 
       // Buscar empresas com seus serviços e estados
@@ -148,21 +223,49 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
 
       console.log("✅ Empresas filtradas:", empresasFiltradas.length);
 
-      // Geocodificar endereços das empresas e calcular distâncias
+      // Buscar todos os serviços de uma vez para mapear IDs para nomes
+      const { data: todosServicos } = await supabase
+        .from("servicos")
+        .select("id, nome");
+      
+      const servicosMap = new Map(
+        (todosServicos || []).map((s: any) => [s.id, s.nome])
+      );
+
+      // Separar empresas que já têm coordenadas das que precisam geocodificar
+      const empresasComCoords = empresasFiltradas.filter((e: any) => e.latitude && e.longitude);
+      const empresasSemCoords = empresasFiltradas.filter((e: any) => !e.latitude || !e.longitude);
+
+      // Geocodificar apenas as que não têm coordenadas (em paralelo)
+      const geocodificacoes = await Promise.all(
+        empresasSemCoords.map(async (empresa: any) => {
+          const coords = await geocodeAddress(empresa.endereco);
+          return { empresa, coords };
+        })
+      );
+
+      // Combinar todas as empresas com suas coordenadas
+      const todasEmpresas = [
+        ...empresasComCoords.map((e: any) => ({
+          empresa: e,
+          coords: { lat: parseFloat(e.latitude), lng: parseFloat(e.longitude) } as Coordinates
+        })),
+        ...geocodificacoes
+      ];
+
+      // Calcular distâncias e scores (em paralelo)
       const empresasComDistancia = await Promise.all(
-        empresasFiltradas.map(async (empresa: any) => {
-          // Usar coordenadas salvas se disponíveis, senão geocodificar
-          let coordsEmpresa: Coordinates | null = null;
-          
-          if (empresa.latitude && empresa.longitude) {
-            coordsEmpresa = {
-              lat: parseFloat(empresa.latitude),
-              lng: parseFloat(empresa.longitude),
-            };
-          } else {
-            coordsEmpresa = await geocodeAddress(empresa.endereco);
-            // Se geocodificou com sucesso, salvar no banco (opcional - pode fazer depois)
-          }
+        todasEmpresas.map(async ({ empresa, coords }) => {
+          // Extrair serviços da empresa usando o map
+          const servicosEmpresa = (empresa.empresa_servicos || [])
+            .map((es: any) => {
+              const servicoId = es.servico_id || es.servicos?.id;
+              const nome = servicosMap.get(servicoId);
+              return nome ? { id: servicoId, nome } : null;
+            })
+            .filter((s: any) => s !== null) as Array<{ id: string; nome: string }>;
+
+          const coordsEmpresa = coords;
 
           let distancia = 0;
           let distanciaTexto = "N/A";
@@ -200,8 +303,27 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
           score -= distancia * 0.5;
           motivo = `${motivo}. Localizada a ${distanciaTexto} do local da vistoria`;
 
-          // Se for Minas Gerais, priorizar empresas com menos chamadas
-          if (values.estado.toUpperCase() === "MG") {
+          // Regra especial para Belo Horizonte: priorizar proximidade E menos chamadas
+          const municipioParaRegra = municipioFinal || values.municipio;
+          const estadoParaRegra = estadoFinal || values.estado;
+          const municipioLower = municipioParaRegra.toLowerCase();
+          const isBeloHorizonte = municipioLower.includes("belo horizonte") || 
+                                   municipioLower.includes("bh") ||
+                                   municipioLower === "b.h." ||
+                                   municipioLower === "b.h";
+
+          if (isBeloHorizonte && estadoParaRegra.toUpperCase() === "MG") {
+            // Para BH: priorizar muito mais empresas com menos chamadas
+            // Quanto menos chamadas, maior o bônus
+            const bonusPorMenosChamadas = (100 - empresa.chamadas_count) * 5;
+            score += bonusPorMenosChamadas;
+            
+            // Penalizar mais por distância em BH
+            score -= distancia * 2;
+            
+            motivo = `${motivo}. BH: ${empresa.chamadas_count} chamada(s) anterior(es) - priorizando menos chamadas e proximidade`;
+          } else if (estadoParaRegra.toUpperCase() === "MG") {
+            // Para outros municípios de MG, manter lógica anterior
             score -= empresa.chamadas_count * 3;
             motivo = `${motivo}. ${empresa.chamadas_count} chamada(s) anterior(es)`;
           }
@@ -220,6 +342,7 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
             distanciaTexto,
             tempo,
             coordenadas: coordsEmpresa || undefined,
+            servicos: servicosEmpresa,
           };
         })
       );
@@ -227,8 +350,21 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
       // Rankear empresas por score (proximidade + regras de negócio)
       const empresasRankeadas: EmpresaRankeada[] = empresasComDistancia
         .sort((a, b) => b.score - a.score);
-
-      onResultados(empresasRankeadas, coordsDemanda);
+      
+      const enderecoCompletoFinal = municipioFinal && estadoFinal 
+        ? `${values.endereco}, ${municipioFinal}, ${estadoFinal}, Brasil`
+        : values.endereco;
+      
+      onResultados(
+        empresasRankeadas, 
+        coordsDemanda,
+        {
+          endereco: enderecoCompletoFinal,
+          municipio: municipioFinal || values.municipio,
+          estado: estadoFinal || values.estado,
+          servicos: values.servicos,
+        }
+      );
 
       if (empresasRankeadas.length === 0) {
         toast.error("Nenhuma empresa encontrada com os critérios especificados");
@@ -263,13 +399,26 @@ export const BuscaVistoriaForm = ({ onResultados }: BuscaVistoriaFormProps) => {
                   {isGoogleMapsEnabled() ? (
                     <GoogleMapsAutocomplete
                       value={field.value}
-                      onChange={field.onChange}
-                      placeholder="Digite o endereço completo..."
+                      onChange={(value) => {
+                        field.onChange(value);
+                        handleEnderecoChange(value);
+                      }}
+                      placeholder="Digite o endereço completo (ex: Rua Exemplo, 123, Bairro, Cidade/UF CEP 12345-678)..."
                     />
                   ) : (
-                    <Input placeholder="Rua, Número, Bairro..." {...field} />
+                    <Input 
+                      placeholder="Rua, Número, Bairro, Cidade/UF (ex: Rua Evaristo Norato, 96/302, B. Residencial São Geraldo, Itaúna/MG CEP 35.680-452)" 
+                      {...field}
+                      onChange={(e) => {
+                        field.onChange(e);
+                        handleEnderecoChange(e.target.value);
+                      }}
+                    />
                   )}
                 </FormControl>
+                <p className="text-xs text-muted-foreground">
+                  💡 Você pode colar o endereço completo. O sistema extrairá automaticamente município e estado se estiverem no formato "Cidade/UF" ou "Cidade, UF".
+                </p>
                 <FormMessage />
               </FormItem>
             )}

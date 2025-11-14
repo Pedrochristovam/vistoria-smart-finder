@@ -23,6 +23,7 @@ const formSchema = z.object({
   email: z.string().email("Email inválido"),
   telefone: z.string().min(8, "Telefone inválido"),
   responsavel: z.string().min(3, "Nome do responsável é obrigatório"),
+  chamadas_count: z.coerce.number().min(0, "Número de chamadas deve ser maior ou igual a 0").default(0),
   servicos: z.array(z.string()).min(1, "Selecione pelo menos um serviço"),
   regioes_mg: z.array(z.string()),
   estados: z.array(z.string()), // Opcional - pode ser vazio ou ter "nenhum"
@@ -48,6 +49,7 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
       email: "",
       telefone: "",
       responsavel: "",
+      chamadas_count: 0,
       servicos: [],
       regioes_mg: [],
       estados: [],
@@ -177,7 +179,7 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
         email: values.email,
         telefone: values.telefone,
         responsavel: values.responsavel,
-        chamadas_count: 0,
+        chamadas_count: values.chamadas_count || 0,
       };
       
       // Adicionar coordenadas apenas se foram obtidas
@@ -374,6 +376,28 @@ export const NovaEmpresaForm = ({ onSuccess }: NovaEmpresaFormProps) => {
               )}
             />
           </div>
+
+          <FormField
+            control={form.control}
+            name="chamadas_count"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Número Inicial de Chamadas</FormLabel>
+                <FormControl>
+                  <Input 
+                    type="number" 
+                    min="0"
+                    {...field}
+                    placeholder="0"
+                  />
+                </FormControl>
+                <p className="text-xs text-muted-foreground">
+                  💡 Número inicial de chamadas. O contador continuará incrementando a partir deste valor.
+                </p>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
           <Separator className="my-6" />
 

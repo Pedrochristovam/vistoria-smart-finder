@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building2, Plus, ClipboardList } from "lucide-react";
+import { Building2, Plus, ClipboardList, Upload } from "lucide-react";
 import { EmpresasList } from "@/components/admin/EmpresasList";
 import { NovaEmpresaForm } from "@/components/admin/NovaEmpresaForm";
+import { ImportarEmpresas } from "@/components/admin/ImportarEmpresas";
 import { HistoricoChamadas } from "@/components/admin/HistoricoChamadas";
-import { useEffect } from "react";
 import { testSupabaseConnection } from "@/lib/test-supabase";
 
 const Admin = () => {
   const [showNovaEmpresa, setShowNovaEmpresa] = useState(false);
+  const [showImportar, setShowImportar] = useState(false);
 
   useEffect(() => {
     // Testar conexão ao carregar a página
@@ -30,7 +32,7 @@ const Admin = () => {
               </div>
             </div>
             <Button asChild variant="outline">
-              <a href="/">Voltar para Busca</a>
+              <Link to="/">Voltar para Busca</Link>
             </Button>
           </div>
         </div>
@@ -56,11 +58,40 @@ const Admin = () => {
                   <h2 className="text-xl font-semibold text-foreground">Empresas Credenciadas</h2>
                   <p className="text-sm text-muted-foreground">Gerencie as empresas aptas para vistorias</p>
                 </div>
-                <Button onClick={() => setShowNovaEmpresa(!showNovaEmpresa)} className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Nova Empresa
-                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={() => {
+                      setShowImportar(!showImportar);
+                      setShowNovaEmpresa(false);
+                    }} 
+                    variant="outline"
+                    className="gap-2"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Importar em Massa
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      setShowNovaEmpresa(!showNovaEmpresa);
+                      setShowImportar(false);
+                    }} 
+                    className="gap-2"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Nova Empresa
+                  </Button>
+                </div>
               </div>
+
+              {showImportar && (
+                <ImportarEmpresas 
+                  onSuccess={() => {
+                    setShowImportar(false);
+                    window.location.reload();
+                  }}
+                  onCancel={() => setShowImportar(false)}
+                />
+              )}
 
               {showNovaEmpresa && (
                 <NovaEmpresaForm onSuccess={() => setShowNovaEmpresa(false)} />
